@@ -1,3 +1,7 @@
+![Cloud Shell Ready](https://img.shields.io/badge/Cloud%20Shell-Ready-4285F4?logo=google-cloud&logoColor=white)
+![Platform GCP](https://img.shields.io/badge/Platform-GCP-4285F4?logo=google-cloud&logoColor=white)
+![Focus Production Patterns](https://img.shields.io/badge/Focus-Production%20Patterns-success)
+
 # TL;DR
 - This repo contains step-by-step production ready setup tutorials for GCP
 - These scenarios are designed for DevOps Engineers looking to up their GCP game (at least knowledge about the available services is recommended - this is not an entry level course, I expect you to know what we're doing, and I will show you how - but you know... you do you)
@@ -40,38 +44,11 @@ We fix the DB setup to be done programmatically. We create an internal domain so
 Work in progress...
 This scenario extends Scenario 1 to implement an SLO based auto-healing setup for the Hello Game App environment. And then we test it...
 
-### Scenario 3 - 
+### Scenario 3 - Migration to Kubernetes
 Work in progress...
 The team wants to test the possibility to deploy Hello Game App to a Kubernetes cluster because they plan to expand heavily adding new features and consider packing the deployment into a helm chart. You are tasked with creating a PoC deployment of existing Cloud Run services to a GKE cluster.
 
 
 
---- notes:
-3. Add a repo structure section
-
-Something like:
-
-/scenario1
-/scenario2
-/app/hello_frontend
-/app/hello_backend
-/app/hello_function
-
-
-This immediately grounds the reader.
-
-4. Consider adding badges
-
-DevOps folks appreciate quick visual cues:
-
-“Cloud Shell ready”
-
-“GCP only”
-
-“Production patterns”
-
-Not necessary, but nice polish.
-
-5. Architecture diagram explanation
-
-You include the diagram, but a couple of sentences explaining the data flow (1-2-3-4) would make it more digestible.
+## Repository Structure
+The repository is structured into scenarios, each scenario contains step-by-step instructions in its README.md file along with any scripts or assets needed to complete the scenario.

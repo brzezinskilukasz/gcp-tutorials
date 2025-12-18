@@ -87,6 +87,17 @@ gcloud billing budgets create --billing-account "YOUR_BILLING" \
 
 And finally for the APIs... we will unlock these as we go, so that you can get a better understanding of what services are under which APIs. The Cloud Console should enable these for you automatically when you try to create a resource that depends on a disabled API. The gcloud CLI will walk you through the process if you try to use a disabled API. Let's move on to our foundations.
 
+## Task 0,5 - Download the scenario repository with the application code
+This scenario was prepared to be run-able from the Cloud Shell. If you choose to run this on your machine, and for some reason it doesn't work, there is only one thing I can say: *it works on my machine*. Jokes aside, I guarantee that it will work on Cloud Shell. To download the repository to your Cloud Shell environment, run the following commands:
+```bash
+git clone https://github.com/brzezinskilukasz/gcp-tutorials.git
+
+# Move to the scenario folder
+cd gcp-tutorials/scenarios/1/
+```
+
+And without further ado, let's get to work. 👷
+
 ## Task 1 - First layer: independent resources
 Time to get our hands dirty. And by dirty I really mean clean, as we're going to go "by the books" and set up a clean foundation for our application. After this step we will be ready to start deploying. First, we need dedicated Service Accounts for each component. As per best practices, each service should run under its own identity so we can apply fine-grained permissions. Press the arrow to expand the gcloud commands. Oh and by the way, something that grinds my gears - this is not the year 1980, we have enough space available - please name your resources in a descriptive manner instead of using random strings of characters or abbreviations that confuse everyone (including you, couple years forward when you're subbing in for a colleague on sick leave in a project that you created and since moved on).  
 
