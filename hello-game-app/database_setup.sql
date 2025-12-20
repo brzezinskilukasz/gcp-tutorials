@@ -6,8 +6,8 @@ CREATE TABLE game_submissions (
 );
 
 -- Grant read permission to hello-backend-sa
-GRANT SELECT ON game_submissions TO "hello-backend-sa@hello-game-app-477717.iam";
+GRANT SELECT ON game_submissions TO "hello-backend-sa@project_id_placeholder.iam";
 
 -- Grant write permission to hello-function-sa (need INSERT and SEQUENCE usage)
-GRANT INSERT ON game_submissions TO "hello-function-sa@hello-game-app-477717.iam";
-GRANT USAGE, SELECT ON SEQUENCE game_submissions_id_seq TO "hello-function-sa@hello-game-app-477717.iam";
+GRANT INSERT ON game_submissions TO "hello-function-sa@project_id_placeholder.iam";
+GRANT USAGE, SELECT ON SEQUENCE game_submissions_id_seq TO "hello-function-sa@project_id_placeholder.iam";

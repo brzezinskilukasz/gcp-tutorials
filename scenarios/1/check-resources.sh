@@ -235,7 +235,7 @@ check_task1() {
     
     # Pub/Sub Topic
     echo -e "\n${YELLOW}Messaging:${NC}"
-    check_pubsub_topic "hello-game-names"
+    check_pubsub_topic "hello-game-submissions"
 }
 
 # Function to run Task 2 checks (placeholder)
@@ -261,6 +261,15 @@ check_task2() {
 # Function to run Task 3 checks
 check_task3() {
     echo -e "\n${BLUE}=== Task 3: Backend Deployment ===${NC}"
+
+    # Private Google Access
+    echo -e "\n${YELLOW}Private Google Access:${NC}"
+    local subnet_name="hello-game-subnet"
+    if gcloud compute networks subnets describe "$subnet_name" --region="$REGION" --format="value(privateIpGoogleAccess)" 2>/dev/null | grep -q "True"; then
+        print_status "PASS" "Private Google Access enabled on $subnet_name"
+    else
+        print_status "FAIL" "Private Google Access NOT enabled on $subnet_name"
+    fi
     
     # Cloud Run Backend
     echo -e "\n${YELLOW}Cloud Run Backend:${NC}"
@@ -275,15 +284,6 @@ check_task3() {
 # Task 4 Verification
 check_task4() {
     echo -e "\n${BLUE}=== Verifying Task 4 Resources ===${NC}"
-    
-    # Private Google Access
-    echo -e "\n${YELLOW}Private Google Access:${NC}"
-    local subnet_name="hello-game-subnet"
-    if gcloud compute networks subnets describe "$subnet_name" --region="$REGION" --format="value(privateIpGoogleAccess)" 2>/dev/null | grep -q "True"; then
-        print_status "PASS" "Private Google Access enabled on $subnet_name"
-    else
-        print_status "FAIL" "Private Google Access NOT enabled on $subnet_name"
-    fi
 
     # Cloud Run Frontend
     echo -e "\n${YELLOW}Cloud Run Frontend:${NC}"
@@ -305,10 +305,10 @@ check_task4() {
     fi
 
     # Check pubsub.publisher on topic
-    if gcloud pubsub topics get-iam-policy hello-game-names --format=json 2>/dev/null | grep -q "hello-frontend-sa@${project_id}.iam.gserviceaccount.com"; then
-         print_status "PASS" "IAM Binding: hello-frontend-sa has publisher access to hello-game-names"
+    if gcloud pubsub topics get-iam-policy hello-game-submissions --format=json 2>/dev/null | grep -q "hello-frontend-sa@${project_id}.iam.gserviceaccount.com"; then
+         print_status "PASS" "IAM Binding: hello-frontend-sa has publisher access to hello-game-submissions"
     else
-         print_status "FAIL" "IAM Binding: hello-frontend-sa missing publisher access to hello-game-names"
+         print_status "FAIL" "IAM Binding: hello-frontend-sa missing publisher access to hello-game-submissions"
     fi
 }
 
