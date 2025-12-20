@@ -720,7 +720,7 @@ Delete the temporary subscription as we will not need this for our application:
 gcloud pubsub subscriptions delete temp-subscription
 ```
 
-> # 💡 Troubleshooting Tip:
+> ### 💡 Troubleshooting Tip:
 > I can't really explain this, but for some reason the messages would sometimes not show up for me when pulling from the gcloud command. However it would work just fine when using the Cloud Console, and only after that the gcloud command would start showing the messages as well. So if you face this issue try checking the Cloud Console first.
 
 Now go back to the frontend and check the statistics page again. You should see real data now fetched from the backend service, which funnily enough means an empty graph (as previously we were shown mock data). Go to the backend logs and you should see something like this:
