@@ -130,7 +130,7 @@ gcloud iam service-accounts create hello-function-sa \
 ```
 </details>  
   
-This is as far as we can go regardin IAM, at least for now. Yes, we could assign roles at the project level immediately, but that would overshoot and violate the principle of least privilege. Once the services exist, we’ll scope roles only to the specific resources they must access (e.g., Pub/Sub topic, Cloud SQL, invoking specific Cloud Run service). That’s when we’ll return to IAM.
+This is as far as we can go regarding IAM, at least for now. Yes, we could assign roles at the project level immediately, but that would overshoot and violate the principle of least privilege. Once the services exist, we’ll scope roles only to the specific resources they must access (e.g., Pub/Sub topic, Cloud SQL, invoking specific Cloud Run service). That’s when we’ll return to IAM.
 
 Next we need a VPC - even though we're relying solely on managed services we will still need it for our Cloud SQL instance - more on that later. For now just create a simple VPC in custom subnet mode and subnet in europe-central2 region (or any other one you fancy, just make sure to adjust the rest of the commands accordingly). Oh and remember to use descriptive names for your resources, please don't name this hga-vpc (what does that mean? well go back to my previous naming rant) or something like that.  
 
@@ -277,17 +277,21 @@ Flags explanation:
 `--root-password` - we need to set a root password here, as we will need it later to set up the database users and their privileges; however we won't be using it for application access, as we'll be using IAM DB Auth for that
 </details>
 
-> ### ⚠️ Warning
+> ## ⏳ Warning
 > This configuration takes quite a bit of time to provision, and if you plan to take a break and stop it, it will also take quite a bit of time to start again. If you're impatient consider provisioning a stronger machine.
 
-Now we have to create our database and the users. Since we will be using IAM DB Authentication we need to create database accounts for our service accounts. This authentication method ties the database user to GCP IAM identity automatically, in a following way (also look at the architecture overview):
-`<SERVICE_ACCOUNT_NAME>@<PROJECT_ID>.iam.gserviceaccount.com` -> `<SERVICE_ACCOUNT_NAME>@<PROJECT_ID>.iam`
-so four our database users to tie them to the IAM Identities we need to create following users:
-- hello-backend-sa@<PROJECT_ID>.iam  
-- hello-function-sa@<PROJECT_ID>.iam  
+Now we have to create our database and the users. Since we will be using IAM DB Authentication we need to create database accounts for our service accounts. This authentication method ties the database user to GCP IAM identity automatically, in a following way (also look at the architecture overview): 
+
+| GCP Service Account                                    | Database User                      | User Type                     |
+|--------------------------------------------------------|------------------------------------|-------------------------------|
+| hello-backend-sa@<PROJECT_ID>.iam.gserviceaccount.com  | hello-backend-sa@<PROJECT_ID>.iam  | cloud_iam_service_account     |
+| hello-function-sa@<PROJECT_ID>.iam.gserviceaccount.com | hello-function-sa@<PROJECT_ID>.iam | cloud_iam_service_account     |
+
+> ## ⚠️ Note
+> Note the differences in the syntax between GCP Service Account and Database User. The database user omits the `.gserviceaccount.com` suffix. This is due to username length limitations in the database.
 
 And assign them the required privileges to operate the database.
-You can read more on managind the IAM db users [here](https://docs.cloud.google.com/sql/docs/postgres/add-manage-iam-users)
+You can read more on managing the IAM db users [here](https://docs.cloud.google.com/sql/docs/postgres/add-manage-iam-users)
 
 <details>
 <summary>gcloud commands for creating database, users and assigning roles</summary>
@@ -310,7 +314,17 @@ gcloud sql users create hello-function-sa@$PROJECT_ID.iam \
 
 And now we are in a little bit of a pickle. We have to assign the required privileges to our service accounts, so that they can operate on the database (for example run the initial db migration). However the instance is in a private network, so we can't connect to it from our local machine (unless we are in a VPN connected to the VPC, but that's an unlikely scenario, especially for our requirements). Cloud Shell can't connect to it either. We could run a job to do that, but... as per our requirements we have to use IAM DB Auth for programatic access, and this would not have any permissions on that database itself. Talk about reducing overhead by running managed services... So the only viable option here is to create a temporary 'bastion' VM inside our VPC, connect to it via SSH and run the required commands from there. Alternatively we could create a script, upload it to the Cloud Storage bucket and then finally import it to our database using the `gcloud sql import` command. But we don't have a bucket. Problems, problems...
 
-...but wait - being an **automation first** enthusiast saying this pains me a little - but Cloud Console to the rescue. Even though we can't connect to the database from Cloud Shell, let's explore this neat feature that will let us into the database. In the Cloud Console to go the Cloud SQL -> Instances -> hello-game-db. Them from the menu on the left select **Cloud SQL Studio**. In the pop-up window select the newly created database and login using username `postgres` and the password we set while creating the instance with the `--root-password` flag. Once inside, open the **Query Editor** tab and paste the contents of the `database_setup.sql` file located in `hello-game-app\database_setup.sql` of this scenario folder. Run the script and voila - our database is ready to go. Simple, wasn't it? And we're only just getting started... Remember, we'll be doing this manually just this one time. </i>(Narrator: It became the permanent deployment process for the next 4 years)</i>
+...but wait - being an **automation first** enthusiast saying this pains me a little - but Cloud Console to the rescue. Even though we can't connect to the database from Cloud Shell, let's explore this neat feature that will let us into the database. In the Cloud Console to go the Cloud SQL -> Instances -> hello-game-db. Then from the menu on the left select **Cloud SQL Studio**. In the pop-up window select the newly created database and login using username `postgres` and the password we set while creating the instance with the `--root-password` flag. We are now connected to our database instance. One more tweak to do, we have to adjust the SA usernames, the script provided in this scenario has placeholders:
+```sql
+GRANT SELECT ON game_submissions TO "hello-backend-sa@project_id_placeholder.iam";
+```
+
+for the project ID, so we have to replace them with our actual project ID. Run this command to replace the placeholders in the SQL file:
+```bash
+sed -i "s/project_id_placeholder/$PROJECT_ID/g" ~/gcp-tutorials/hello-game-app/database_setup.sql
+```
+
+Once inside, open the **Query Editor** tab and paste the contents of the `database_setup.sql`. Run the script and voila - our database is ready to go. Simple, wasn't it? And we're only just getting started... Remember, we'll be doing this manually just this one time. </i>(Narrator: It became the permanent deployment process for the next 4 years)</i>
 
 🎉 **Congratulations!** You've successfully set up a fully private Cloud SQL database instance and we even managed to miraculously connect to it!
 
@@ -429,12 +443,27 @@ A small snippet from the code showing how only these three variables are used to
 Now you might wonder: how the hell am I going to verify that the backend is working and able to connect (actually currently not connect because of the missing IAM roles) if I closed it off completely. While this is a great question and real concern for such a scenario and requirement - fear not. The application runs a DB Health Check probe every 30 seconds and logs the result. For ease of management of such highly restricted environments it would be my recommendation to have such a mechanism in place, but not only is this not a programming tutorial, I am also not a programmer - so **do not** take coding advice from me. (the way this probe is implemented is not really the best practice - the app has a /health health-check endpoint that would also log the result, however we can't directly access it - we would have to set up an uptime check in GCP that would hit it, but - spoiler alert - this will be scenario 2, and current implementation works out of the box)
 
 Let's see what's going on then. This is really better done through the **Cloud Console**, so this time no gcloud command. Head over to **Cloud Run -> hello-backend -> Logs** and observe the logs. The connector throws some ugly stacktraces about not being able to connect to the database, so in the filter type `src.main` and you should see something like this:
+```log
+2025-12-19 09:53:43.291 CET 2025-12-19 08:53:43,290 - src.main - ERROR - DB Health Check: FAILED - Connection timeout to host https://sqladmin.googleapis.com/sql/v1beta4/projects/hello-game-app-477717/instances/hello-game-db/connectSettings
+```
+So what is this and what is going on, you were probably expecting a 403 or something of that sorts, since we didn't apply the IAM permissions. The Cloud Run is connected to the VPC, through the Direct VPC egress, the Cloud SQL instance is in the VPC, so this should be reachable. But here's the catch in our modern setup, if you remember correctly we've never passed any database information to our application other than the instance connection name. The Cloud SQL Python Connector uses the Cloud SQL Admin API to fetch the database instance metadata (IP address, SSL certs, etc) in order to establish the connection. But we've forced all of the egress traffic through the VPC, and have not enabled the access to Google APIs through that VPC. Meaning simply that our Cloud Run instance can't reach the Google APIs endpoints, as there is no routing set up. This will also come in handy later on when we deploy the frontend service, as it will also need to reach the backend service through the VPC. This [document](https://docs.cloud.google.com/run/docs/securing/private-networking#from-other-services) describes ways of forcing the Cloud Run services to access each other (and Google APIs) through the VPC instead of going through the public internet. We're going with option #1 which is:
+> Make sure traffic to Cloud Run routes through the VPC network by using one of the following options:
+> - Configure the source resource to route all traffic through the VPC network and enable Private Google Access on the subnet associated with Direct VPC egress [...].
+
+To enable Private Google Access on our subnet run the following command:
+```bash
+gcloud compute networks subnets update $SUBNET \
+  --region=$REGION \
+  --enable-private-ip-google-access
+```
+
+Now a second round on the logs, different errors suggest that we're moving in the right direction, so do not get discouraged, filter the logs again by `src.main` and look for the line similar to this one:
 ```
 2025-11-20 08:45:22,501 - src.main - ERROR - DB Health Check: FAILED - 403, message='boss::NOT_AUTHORIZED: Not authorized to access resource. Possibly missing permission cloudsql.instances.get on resource instances/hello-game-db.', url='https://sqladmin.googleapis.com/sql/v1beta4/projects/hello-game-app-477717/instances/hello-game-db/connectSettings'
 ```
 which is expected because we deliberately skipped assigning the required IAM roles. Let's fix this and observe if this fixes the connection issues.
 
-Supress the inner voices trying to convince you to apply the cloudsql.admin role to the service account and just forget about it - repeat after me: *We are doing it the right way*. Remember that we've already set the required permission for the SA's database user, so this has been taken care of. What we're lacking at the moment is the ability for our application to connect and login to the database. As we're reducing our overhead, we're going to use the predefined roles for our IAM policies, these are pretty solid most of the times and should cover most of the use cases. Let's head over to the [available iam-roles](https://docs.cloud.google.com/sql/docs/postgres/iam-roles) and see if there's anything we can use. I encourage you to take a look yourself, below is the gcloud command that will grant the required permissions to the service account - did you choose the same role? Now before you apply these roles, look below into the commands, because as per usual, it comes with a quirk:
+Suppress the inner voices trying to convince you to apply the cloudsql.admin role to the service account and just forget about it - repeat after me: *We are doing it the right way*. Remember that we've already set the required permission for the SA's database user, so this has been taken care of. What we're lacking at the moment is the ability for our application to connect and login to the database. As we're reducing our overhead, we're going to use the predefined roles for our IAM policies, these are pretty solid most of the times and should cover most of the use cases. Let's head over to the [available iam-roles](https://docs.cloud.google.com/sql/docs/postgres/iam-roles) and see if there's anything we can use. I encourage you to take a look yourself, below is the gcloud command that will grant the required permissions to the service account - did you choose the same role? Now before you apply these roles, look below into the commands, because as per usual, it comes with a quirk:
 <details>
 <summary>gcloud command for adding required IAM roles to the service account</summary>
 
@@ -530,33 +559,23 @@ After you implement the required policies go back to the Cloud Run Logs, the bac
 Let's run our verification script to make sure everything is properly configured. As always keep in mind that the script assumes you have named your resources exactly as specified in my workflow. Also we only verify if the roles are bound to the correct SA, we do not check if the conditions are applied correctly because I'm too lazy to implement that in a robust way:
 
 ```bash
+# Move back to the scenario folder
+cd ~/gcp-tutorials/scenarios/1/
+
 # Make the script executable (if you haven't already)
 chmod +x ./check-resources.sh
 
 # Run the Task 3 verification
 ./check-resources.sh task-3
 ```
-If you see **"All checks passed! (3/3)"** - you're on fire! 🔥
+If you see **"All checks passed! (4/4)"** - you're on fire! 🔥
 
 
 ## Task 4 - Third layer part 2: finally something we can connect to - enter the frontend application
-We're getting close, can you feel it? Closing the laptop and calling it a day... Let's deploy this frontend and get this over with. **BUT WAIT**, another trap we've set up for ourselves. Let's take a step back and think about our current setup. We have a backend service that we've cleverly closed off from all external traffic. And what is its address that it was given? Something like `https://hello-backend-908743237313.europe-central2.run.app`. Now this doesn't seem like an internal address to me, and so it won't to our frontend, which will then look for it on the public internet, it will find where it lies (because even though we don't allow public traffic to the service this address can be resolved to our backend globally, it just won't be allowed), go through the public web and **BOOM** - access denied since we only allow internal traffic. Luckily we are not the first ones to face this problem and there is a solution just for our case (actually there 3 solutions as per Google's docs, but we're going with the simplest one that fits our requirements, especially since we're 90% there already). This [document](https://docs.cloud.google.com/run/docs/securing/private-networking#from-other-services) describes ways of forcing the Cloud Run services to access each other through the VPC instead of going through the public internet. We're going with option #1 which is:
-> Make sure traffic to Cloud Run routes through the VPC network by using one of the following options:
-> - Configure the source resource to route all traffic through the VPC network and enable Private Google Access on the subnet associated with Direct VPC egress [...].
+We're getting close, can you feel it? Closing the laptop and calling it a day... Let's deploy this frontend and get this over with. **BUT WAIT**, another trap we've set up for ourselves. Let's take a step back and think about our current setup. We have a backend service that we've cleverly closed off from all external traffic. And what is its address that it was given? Something like `https://hello-backend-908743237313.europe-central2.run.app`. Now this doesn't seem like an internal address to me, and so it won't to our frontend, which will then look for it on the public internet, it will find where it lies (because even though we don't allow public traffic to the service this address can be resolved to our backend globally, it just won't be allowed), go through the public web and **BOOM** - access denied since we only allow internal traffic. Luckily we are not the first ones to face this problem and there is a solution just for our case (actually there 3 solutions as per Google's docs, but we're going with the simplest one that fits our requirements, especially since we're 90% there already). And not only that, we've already set this up while deploying the backend service and facing the issue with DB connection. Remember the **Direct VPC egress**? We're going to use it here as well.
 
-A little explanation on this: by enabling the **Private Google Access** on the subnet we're telling GCP that any requests to Google APIs (and Cloud Run uses Google Front Ends, which are internal Google services accessible via public DNS (the `app.run` domain)) made from within our subnet should be routed through Google's internal network instead of going through the public internet (the DNS is still public, but it will be routed internally). Next up we connect our frontend to the VPC using the  **Direct VPC egress** and set the `--vpc-egress` flag to `all-traffic`, effectively forcing all of the requests that the frontend makes to go through the VPC. This way we are forcing our frontend application to talk to the Google's services (which our backend is) through the internal network, which in exchange will satisfy the ingress rules of our backend service. Simple, isn't it?
-
-Let's start by enabling the **Private Google Access** on our subnet:
-
-<details>
-<summary>gcloud command for enabling Private Google Access on the subnet</summary>
-
-```bash
-gcloud compute networks subnets update $NETWORK \
-  --region=$REGION \
-  --enable-private-ip-google-access
-```
-</details>
+> ### 💡 Explanation time
+> A little explanation on this: by enabling the **Private Google Access** on the subnet we're telling GCP that any requests to Google APIs (and Cloud Run uses Google Front Ends, which are internal Google services accessible via public DNS (the `app.run` domain)) made from within our subnet should be routed through Google's internal network instead of going through the public internet (the DNS is still public, but it will be routed internally). Next up we connect our frontend to the VPC using the  **Direct VPC egress** and set the `--vpc-egress` flag to `all-traffic`, effectively forcing all of the requests that the frontend makes to go through the VPC. This way we are forcing our frontend application to talk to the Google's services (which our backend is) through the internal network, which in exchange will satisfy the ingress rules of our backend service. Simple, isn't it?
 
 Now as we did with our backend, let's navigate to the frontend source code folder and review what's in there:
 ```bash
@@ -662,7 +681,7 @@ gcloud run services add-iam-policy-binding hello-backend \
   --member="serviceAccount:hello-frontend-sa@$PROJECT_ID.iam.gserviceaccount.com" \
   --role="roles/run.invoker"
 
-gcloud pubsub topics add-iam-policy-binding hello-game-names \
+gcloud pubsub topics add-iam-policy-binding hello-game-submissions \
   --member="serviceAccount:hello-frontend-sa@$PROJECT_ID.iam.gserviceaccount.com" \
   --role="roles/pubsub.publisher"
 ```
@@ -682,7 +701,7 @@ Now go back to the frontend logs and try submitting a name again. You should see
 To verify that the name made it to the Pub/Sub topic we need to create a temporary subscription to the topic and pull the messages. Here's how to do it:
 ```bash
 # Create the subscription
-gcloud pubsub subscriptions create temp-subscription --topic=hello-game-names
+gcloud pubsub subscriptions create temp-subscription --topic=hello-game-submissions
 
 # Pull messages from the subscription
 gcloud pubsub subscriptions pull temp-subscription --auto-ack --limit=5
@@ -700,6 +719,9 @@ Delete the temporary subscription as we will not need this for our application:
 ```bash
 gcloud pubsub subscriptions delete temp-subscription
 ```
+
+> # 💡 Troubleshooting Tip:
+> I can't really explain this, but for some reason the messages would sometimes not show up for me when pulling from the gcloud command. However it would work just fine when using the Cloud Console, and only after that the gcloud command would start showing the messages as well. So if you face this issue try checking the Cloud Console first.
 
 Now go back to the frontend and check the statistics page again. You should see real data now fetched from the backend service, which funnily enough means an empty graph (as previously we were shown mock data). Go to the backend logs and you should see something like this:
 ```log
@@ -726,7 +748,7 @@ chmod +x ./check-resources.sh
 # Run the Task 4 verification
 ./check-resources.sh task-4
 ```
-If you see **"All checks passed! (4/4)"** - you're almost there mate, thank you for putting up with me! 🌟
+If you see **"All checks passed! (3/3)"** - you're almost there mate, thank you for putting up with me! 🌟
 
 ## Task 5 - Third layer part 3: the last piece of the puzzle - Cloud Function to process Pub/Sub messages
 We're in the home stretch now, just one last component to deploy - the Cloud Function. Honestly, at this point it feels like we've faced every possible obstacle GCP can throw at us, so hopefully this will be smooth sailing. Let's navigate to the function source code folder and review what's in there:
@@ -736,26 +758,131 @@ cd ~/gcp-tutorials/hello-game-app/hello-function/
 ls -la
 ```
 
-Nothing fancy again. This will actually use **Buildpacks** behind the curtains to build the function's container. Let's deploy it. Remember our requirements (force the traffic through the VPC, or our database will not allow it). We can also set up the trigger right at the deployment time by specifying the Pub/Sub topic (you want to do this). Here's the command:
+Nothing fancy again. This will actually use **Buildpacks** behind the curtains to build the function's container. Let's deploy it. Remember our requirements (force the traffic through the VPC, or our database will not allow it). We can also set up the trigger right at the deployment time by specifying the Pub/Sub topic (you want to do this). And now GCP is back at it again. A little background - 2nd gen Cloud Functions actually run on Cloud Run infrastructure, and it is recommended that they are managed using the Cloud Run Admin API. Let's try a simple test (this little conundrum will not be seem through the Cloud Console, only when using gcloud CLI). Here's the deployment command:
 <details>
 <summary>gcloud command for deploying the Cloud Function</summary>
+
+> ### ❗ Warning of what's to come ❗
+> Below is a little bit of a rant on my part, some troubleshooting steps.  
+> If you enjoy the way I'm going through this adventure then I recommend reading through it, otherwise skip to the command after the rant.  
+> As stated above this is a gcloud CLI issue, it should not be present when deploying through the Cloud Console.  
+
+<details>
+<summary>Troubleshooting the mixup with Cloud Functions migration to Cloud Run</summary>
 
 ```bash
 gcloud functions deploy hello-function \
   --region=$REGION \
   --gen2 \
   --runtime=python312 \
+  --source . \
   --service-account=hello-function-sa@$PROJECT_ID.iam.gserviceaccount.com \
   --no-allow-unauthenticated \
   --entry-point=process_pubsub_message \
-  --trigger-topic=hello-game-names \
+  --trigger-topic=hello-game-submissions \
   --network=$NETWORK \
   --subnet=$SUBNET \
   --vpc-egress=all-traffic \
   --set-env-vars INSTANCE_CONNECTION_NAME="$PROJECT_ID:$REGION:hello-game-db",DB_USER="hello-function-sa@$PROJECT_ID.iam",DB_NAME="hello-game-submissions-db",ENVIRONMENT=production
 ```
 
-Parameters explained:
+and 💥 **BOOM** 💥 - surprise:
+
+```bash
+ERROR: (gcloud.functions.deploy) unrecognized arguments:
+  --network=hello-game-vpc (did you mean '--retry'?)
+  --subnet=hello-game-subnet (did you mean '--quiet'?)
+  --vpc-egress=all-traffic
+  To search the help text of gcloud commands, run:
+  gcloud help -- SEARCH_TERMS
+```
+
+Let's dig in briefly, and see what's going on in here. Just for the sake of it let's check the help for `gcloud functions deploy`:
+
+```bash
+gcloud functions deploy --help | grep -E "network|subnet|vpc-egress"
+```
+
+Nothing - let's double check the cloud run help:
+
+```bash
+gcloud run deploy --help | grep -E "network|subnet|vpc-egress"
+```
+
+looks solid. So now we have the Cloud Run function that supports the Direct VPC Egress (because it's gen 2, meaning it runs on Cloud Run and we already have a Cloud Run service with it deployed, so we know it does actually work), but we can't deploy it with the required flags? Let's take a step back and remember the recommendation - Cloud Run functions gen2 should be managed using the Cloud Run Admin API, let's continue our investigation there:
+
+```bash
+gcloud run deploy --help | grep -E "function"
+```
+
+and here's our answer:
+```bash
+At most one of these can be specified:
+
+           [...]
+
+           --function=FUNCTION
+              Specifies that the deployed object is a function. If a value is
+              provided, that value is used as the entrypoint.
+```
+So with this slightly long investigation we've not only found out that we should be deploying the function using `gcloud run deploy` instead of `gcloud functions deploy`, but we've also managed to stretch out this chapter that on the first glance seemed like a quick and easy one. Here's the command:
+```bash
+gcloud run deploy hello-function \
+  --region=$REGION \
+  --source . \
+  --service-account=hello-function-sa@$PROJECT_ID.iam.gserviceaccount.com \
+  --no-allow-unauthenticated \
+  --function=process_pubsub_message \
+  --trigger-topic=hello-game-submissions \
+  --network=$NETWORK \
+  --subnet=$SUBNET \
+  --vpc-egress=all-traffic \
+  --set-env-vars INSTANCE_CONNECTION_NAME="$PROJECT_ID:$REGION:hello-game-db",DB_USER="hello-function-sa@$PROJECT_ID.iam",DB_NAME="hello-game-submissions-db",ENVIRONMENT=production
+```
+and 💥 **BOOM** 💥 - another surprise:
+```bash
+ERROR: (gcloud.run.deploy) unrecognized arguments:
+  --trigger-topic=hello-game-submissions
+```
+
+At this point we're banging our heads against the wall. This `--trigger-topic` flag is a godsend that sets up quite a bit of things for us during the Function deployment, but now we're stuck - we either deploy without the Direct VPC egress and the function will not work - or we deploy with it, but we can't use the one thing that GCP was handing to us on a silver platter. So, and now my brain is working at 200% capacity, let's get a little creative:
+1. Deploy the function without the networking flags, but with the trigger topic using the `gcloud functions deploy` command - this will set up the function as a Cloud Run service and the EventArc trigger for us.
+2. Update the function to add the networking flags using the `gcloud run services update` command - since we can manage functions set up as gen 2 using the Cloud Run Admin API this should work just fine.
+
+</details>
+
+> ### The reasoning for the workaround below (the two step deployment) is explained in detail in the **Troubleshooting...** dropdown section above.
+
+```bash
+# 1. Deploy the function (without networking flags first)
+gcloud functions deploy hello-function \
+  --region=$REGION \
+  --gen2 \
+  --runtime=python312 \
+  --source . \
+  --service-account=hello-function-sa@$PROJECT_ID.iam.gserviceaccount.com \
+  --no-allow-unauthenticated \
+  --entry-point=process_pubsub_message \
+  --trigger-topic=hello-game-submissions \
+  --set-env-vars INSTANCE_CONNECTION_NAME="$PROJECT_ID:$REGION:hello-game-db",DB_USER="hello-function-sa@$PROJECT_ID.iam",DB_NAME="hello-game-submissions-db",ENVIRONMENT=production
+```
+Now the function will be deployed, you will be able to see it in the Cloud Console, you can even go to it's **Networking** section and see that it's empty (compare to hello-backend for example). We know that this will not work because the function won't be able to connect to the database, we went through this with our backend setup. So let's update the function to add the required networking setup:
+```bash
+# 2. Update the function to add networking setup
+gcloud run services update hello-function \
+  --region=$REGION \
+  --network=$NETWORK \
+  --subnet=$SUBNET \
+  --vpc-egress=all-traffic
+```
+
+This should spawn a new revision, you can again go to the Cloud Console, check the **Networking** section of the function and see that now it has the VPC and subnet assigned. That should do it. If it's stupid but it works, it ain't stupid. Right? Right?
+
+> ### ❗ Important Note
+> The 2 step deployment is obviously a workaround for a missing feature - it might be fixed or improved in the future, that was the state at the time of creating this tutorial and I have no idea if I will get back to it and update when Google patches this.
+
+
+And finally - parameters explained:
 `--runtime` the runtime environment for the function; in our case Python 3.12, this tells GCP which environment to set up for our function
 
 `--gen2` deploys the function in the 2nd generation environment, which is crucial for our networking setup; gen1 does not support Direct VPC egress
@@ -768,9 +895,9 @@ Parameters explained:
 
 `--trigger-topic` the Pub/Sub topic that will trigger the function; this will set up an EventArc trigger behind the scenes for us and not only that - this comes with all the required permissions out of the box (well, almost but we'll get to it soon) - finally Google is giving us something
 
-`--network` and `--subnet` specify the VPC and subnet to route traffic through; as explained in previous section this will enable the **Direct VPC egress** for our function
+`--network` and `--subnet` (applied in step 2) specify the VPC and subnet to route traffic through; as explained in previous section this will enable the **Direct VPC egress** for our function
 
-`--vpc-egress` as explained above, we force the outbound traffic to go through the VPC which in turn makes it internal when accessing Google APIs
+`--vpc-egress` (applied in step 2) as explained above, we force the outbound traffic to go through the VPC which in turn makes it internal when accessing Google APIs
 
 `--set-env-vars` sets environment variables for the application; same as with the backend and frontend these are specific to this application. Again, note that **we don't provide any passwords or secrets**:
 - `INSTANCE_CONNECTION_NAME` - our function has the Cloud SQL Python Connector injected into it. The setup is the exact same as for the backend - for the Cloud SQL connectors this needs to be in a format of `project:region:instance-name` (tip: you can run `gcloud sql instances describe hello-game-db --format="value(connectionName)"` to get the correct value)
@@ -780,7 +907,7 @@ Parameters explained:
 
 Before we apply the required IAM roles let's take a look what's going on in the function logs. You should see something like this (if you have messages waiting in the Pub/Sub queue, if not - post something through the frontend first):
 ```log
-2025-12-10 18:46:11.313 CET POST 403 0B 0ms APIs-Google; (+https://developers.google.com/webmasters/APIs-Google.html) https://hello-function-lbnmovjjsq-lm.a.run.app/?__GCP_CloudEventsMode=CUSTOM_PUBSUB_projects%2Fhello-game-app-477717%2Ftopics%2Fhello-game-names 
+2025-12-10 18:46:11.313 CET POST 403 0B 0ms APIs-Google; (+https://developers.google.com/webmasters/APIs-Google.html) https://hello-function-lbnmovjjsq-lm.a.run.app/?__GCP_CloudEventsMode=CUSTOM_PUBSUB_projects%2Fhello-game-app-477717%2Ftopics%2Fhello-game-submissions 
 ```
 
 #### 🔑 Why we get a 403
@@ -805,7 +932,7 @@ serviceAccount: hello-function-sa@hello-game-app-477717.iam.gserviceaccount.com 
 transport:
   pubsub:
     subscription: projects/hello-game-app-477717/subscriptions/eventarc-europe-central2-hello-function-874439-sub-020
-    topic: projects/hello-game-app-477717/topics/hello-game-names
+    topic: projects/hello-game-app-477717/topics/hello-game-submissions
 ```
 Note the serviceAccount field: `serviceAccount: hello-function-sa@hello-game-app-477717.iam.gserviceaccount.com` - this is the identity that the trigger uses to invoke the function. Interestingly enough this is the same account that we specified for the function itself. Now this could be altered through the `--trigger-service-account` flag when deploying the function. However using the same identity for both the runtime and the trigger is the default behavior and simplifies our setup without introducing additional service accounts.
 
