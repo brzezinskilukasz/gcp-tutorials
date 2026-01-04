@@ -1001,5 +1001,16 @@ chmod +x ./check-resources.sh
 On the final note - it's impressive how one, seemingly simple requirement - "make all the backend traffic internal only" - can lead to such a complex setup with multiple components. This exercise highlights the importance of understanding GCP's networking and security features, as well as the need for careful planning when designing cloud architectures. Kudos to you for making it through this challenging scenario!
 
 
+## 🚧 Lab environment teardown
+For the clean up we're going atomic - first unbind the billing account from the project to block any charges and then delete it:
+
+```bash
+# Unlink the billing account
+gcloud beta billing projects unlink $PROJECT_ID
+
+# Delete the project
+gcloud projects delete $PROJECT_ID
+```
+
 # Final Note 🔒
 The security and overall best practices world is vast and ever-evolving. In this scenario we've **focused** on a particular set of requirements and implemented a solution that meets them, while skipping over a couple of red flags - the reason being, not to clutter the scenario with too many concepts at once (i.e. our initial DB migration strategy, which I've also used as an entrypoint for a, sadly, relatable joke). In a real-world production setup you would obviously want to address these as well - which to make myself look better and highlight that I know this -  I am acknowledging in this final note.
